@@ -8,6 +8,7 @@
 
 # Dependencies
 # python: simplejson,pycurl
+# pygame - http://f0o.com/~rene/stuff/pygame-1.9.2pre-py2.6-macosx10.6.mpkg.zip
 # binaries: sox
 
 # Known Issues
@@ -21,7 +22,8 @@
 
 
 import sys
-sys.path.append('/Library/Python/2.6/site-packages')
+#sys.path.append('/Library/Python/2.6/site-packages')
+sys.path.append("/Users/rory/Dropbox/dev/TableTalk/PyTagCloud/src/")
 import os
 import time
 import subprocess
@@ -42,29 +44,36 @@ GOOG_SPEECH_URL='https://www.google.com/speech-api/v1/recognize?xjerr=1&client=c
 YAHOO_APP_ID = 'YahooDemo' # Change this to your API key
 YAHOO_TE_URL_BASE = 'http://search.yahooapis.com/ContentAnalysisService/V1/termExtraction'
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s %(levelname)s %(message)s')
+TE_PHRASES_FILE = "tabletalk_te_phrases.txt"
+
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+
+global te_file
 
 class YahooSearchError(Exception):
 	pass
 
 def main():
-	#try:
+	try:
+		signal.signal(signal.SIGINT, signal_handler) #register signal handler to catch ctrl-c program exit
+		
 		if not os.path.exists(REC):
 			os.makedirs(REC)
 	
 		if not os.path.exists(UPLOADED):
 			os.makedirs(UPLOADED)
-	
+
 		# clear out previous recordings
-		#deleteDirContents(REC)
-		#deleteDirContents(UPLOADED)
+		deleteDirContents(REC)
+		deleteDirContents(UPLOADED)
 	
 		# start sox
-		#rec = subprocess.Popen(SOXDIR+"/rec -r "+BR+" "+REC+"/tabletalk.flac trim 0 00:00:10 : newfile : restart &> recording.log", shell=True)
+		rec = subprocess.Popen(SOXDIR+"/rec -r "+BR+" "+REC+"/tabletalk.flac trim 0 00:00:10 : newfile : restart &> recording.log", shell=True)
 		
-
-		#setup pycurl
+		#blank the file each time
+		te_file = open(TE_PHRASES_FILE,"w")
+		te_file.close()
 
 
 		while True:
@@ -94,25 +103,36 @@ def main():
 					body.seek(0)				
 					ret = simplejson.loads(body.read())
 					
+					#print "ret"
+					#print ret
+					#print "+++++++++++++++++"
 					hypotheses = ret['hypotheses']
-					transcription = hypotheses[0]['utterance']
-					confidence = hypotheses[0]['confidence']
-					print "Google Speech API:"
-					print "Transcription: " + transcription
-					print "Confidence: " + str(confidence)
+					#print hypotheses
 
-					# send to yahoo term extraction api
-					try:
-						yte_ret = yahoo_term_extraction(transcription)
-						print "Results from Yahoo Term Extraction API:"
-						print yte_ret
-						
-						#logging.info("Moving " + files[0] + " to uploaded dir")
-						os.rename(os.path.join(REC,files[0]), os.path.join(UPLOADED,files[0]))
-					except YahooSearchError, e:
-					    print "An API error occurred."
-					except IOError:
-					    print "A network IO error occured during the call to the Yahoo Term Extraction API."
+					print "+++++++++++++++++"
+					if len(hypotheses) > 0:
+						transcription = hypotheses[0]['utterance']
+						confidence = hypotheses[0]['confidence']
+						print "Google Speech API:"
+						print "Transcription: " + transcription
+						print "Confidence: " + str(confidence)
+
+						# send to yahoo term extraction api
+						try:
+							yte_ret = yahoo_term_extraction(transcription)
+							print "Results from Yahoo Term Extraction API:"
+							print yte_ret
+							with open(TE_PHRASES_FILE, "a") as f:
+								for s in yte_ret['Result']:
+									f.write(s + '\n')
+							f.close()
+							
+							#logging.info("Moving " + files[0] + " to uploaded dir")
+							os.rename(os.path.join(REC,files[0]), os.path.join(UPLOADED,files[0]))
+						except YahooSearchError, e:
+						    print "An API error occurred."
+						except IOError:
+						    print "A network IO error occured during the call to the Yahoo Term Extraction API."
 
 					
 				else:	
@@ -124,8 +144,8 @@ def main():
 				print ""
 			else:
 				time.sleep(1) # keeps cpu from going to 100% when no files to process (tight while loop)
-	#except KeyboardInterrupt:
-	#	os.kill(rec.pid, signal.SIGTERM)		
+	except KeyboardInterrupt:
+		os.kill(rec.pid, signal.SIGTERM)		
 
 def yahoo_term_extraction(context, query="", **kwargs):
     kwargs.update({
@@ -156,6 +176,14 @@ def deleteDirContents(path):
 	            os.unlink(file_path)
 	    except Exception, e:
 	        print e
+
+def signal_handler(signal, frame):
+	print 'You pressed Ctrl+C'
+	cleanup()
+	sys.exit(0)
+
+def cleanup():
+	print "Exiting program"
 
 if __name__ == "__main__":
     main()

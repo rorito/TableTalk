@@ -16,7 +16,6 @@ HEIGHT=900
 IMAGE_FILE = 'cloud_large.png'
 
 def main():	
-	createWordCloud()
 	pyGameDisplay()
 
 def createWordCloud():	
@@ -32,9 +31,10 @@ def pyGameDisplay():
 	tagCloud = pygame.image.load(IMAGE_FILE)
 	
 	while 1:
+		createWordCloud()
 		screen.blit(tagCloud, tagCloud.get_rect())
 		pygame.display.update()
-		time.sleep(1)
+		time.sleep(2)
 
 if __name__ == "__main__":
     main()
