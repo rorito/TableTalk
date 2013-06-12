@@ -1,0 +1,113 @@
+#!/usr/bin/env ruby
+# -*- encoding: binary -*-
+
+require 'rubygems'
+require 'json'
+require 'speech'
+
+$:.unshift File.expand_path(File.join(File.dirname(__FILE__), '/../lib'))
+require 'revision'
+
+if ARGV.size == 0
+  puts "usage #{$0} input.wav"
+  exit 1
+end
+
+input = ARGV[0]
+
+system("./splitter -i #{input} -t 15 -d 0.2 -D 9")
+path = File.dirname(input)
+
+results = []
+confidence = 0
+count = 0
+root_name = File.basename(input).gsub(/\.wav$/,'')
+
+# it's important that contiguous chunks stay connected otherwise partial words might be sent for transcribing
+chunks = Dir["#{path}/#{root_name}*.wav.chunk*"].sort do|a, b|
+  da = a.scan(/(\d+)/)
+  dav = da.flatten.join(".")
+
+  db = b.scan(/(\d+)/)
+  dbv = db.flatten.join(".")
+  
+  Revision.new(dav) <=> Revision.new(dbv)
+end
+
+# now attempt to combine chunks to be as close to 10 seconds as possible
+accom = Speech::AudioInspector::Duration.new("00:00:00.00")
+merge_set = [] # array of [chunk,duration]
+merged_chunks = []
+chunks.each_with_index do|chunk, i|
+  inspector = Speech::AudioInspector.new(chunk)
+  stamp = inspector.duration
+  accom = accom + stamp
+
+  puts "check: #{accom}, #{accom.to_f}"
+  merge_set << [chunk, stamp]
+
+  if accom.to_f > 9.0
+    last = merge_set.pop
+
+    accom = Speech::AudioInspector::Duration.new("00:00:00.00")
+    merge_set.each {|s| accom = accom + s.last }
+    merged_list = merge_set.map {|c| c.first }.join(' ')
+    merge_name = "merged_chunk#{i}.wav"
+    puts "\tmerge(#{accom.to_s}): #{merge_set.inspect} as #{merge_name}"
+    if merge_set.size == 1
+      system("cp #{merged_list} #{merge_name}")
+    else
+      system("./merge-wave #{merged_list} #{merge_name}")
+    end
+    merged_chunks << merge_name
+
+    merge_set = [last]
+    accom = Speech::AudioInspector::Duration.from_seconds(last.last.to_f)
+  end
+end
+
+if !merge_set.empty?
+  merged_list = merge_set.map {|c| c.first }.join(' ')
+  merge_name = "merged_chunk_last.wav"
+  system("./merge-wave #{merged_list} #{merge_name}")
+  merged_chunks << merge_name
+end
+puts merged_chunks.inspect
+
+# unlink all chunks
+chunks.each do |chunk|
+  File.unlink(chunk)
+end
+
+merged_chunks.each do|wave|
+  chunk_file = wave.gsub(/\.wav/,'') + ".wav"
+  system("mv #{wave} #{chunk_file}")
+  system("speech2text #{chunk_file}")
+  wave_text = chunk_file.gsub(/\.wav$/,'.json')
+  if File.exist?(wave_text)
+    out = JSON.parse(File.read(wave_text))
+    if out && out['hypotheses'] && !out['hypotheses'].empty?
+      results << out['hypotheses'].first.first
+      confidence += out['hypotheses'].first.last
+      count += 1
+    end
+  end
+end
+
+if chunks.size == 0
+  # send the original file
+  system("speech2text #{input}")
+  wave_text = input.gsub(/\.wav$/,'.json')
+  if File.exist?(wave_text)
+    out = JSON.parse(File.read(wave_text))
+    if out && out['hypotheses'] && !out['hypotheses'].empty?
+      results << out['hypotheses'].first.first
+      confidence += out['hypotheses'].first.last
+      count += 1
+    end
+  end
+end
+
+confidence /= count
+puts results.join(" ")
+puts confidence
